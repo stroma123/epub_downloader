@@ -1,7 +1,7 @@
 import os.path
 from http import HTTPStatus
 from time import sleep
-import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 from requests import HTTPError
 from tqdm import tqdm
@@ -34,7 +34,8 @@ class EpubFileDownloader:
                 self.logster.log(
                     f"Fetching URL: {url} (Attempt {attempt + 1}/{MAX_RETRIES})"
                 )
-                response = requests.get(url)
+                scraper = cloudscraper.create_scraper()
+                response = scraper.get(url)
                 response.raise_for_status()
                 if response.content is None:
                     return False
