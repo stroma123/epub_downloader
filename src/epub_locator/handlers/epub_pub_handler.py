@@ -10,18 +10,33 @@ from src.epub_locator.epub_handler import EpubHandler
 class EpubPubHandler(EpubHandler):
     def get_epub_base_url(self) -> str:
         domain = urlparse(self.url).netloc
-        if domain == "spread.epub.pub" or domain == "continuous.epub.pub":
-            content_opf_url: str = self._get_epub_pub_ebook_content_opf_url(self.url)
-            epub_base_url: str = self._get_epub_base_url_from_specific_url(
-                content_opf_url
+        if domain == "continuous.epub.pub":
+            scraper = cloudscraper.create_scraper()
+            response = scraper.get(self.url)
+            response.raise_for_status()
+
+            match = re.search(
+                r'https://asset\.epub\.pub/epub/[^"\\\s]+?\.epub/',
+                response.text,
             )
+            if not match:
+                raise RuntimeError(
+                    "Failed to find EPUB base URL in the continuous page."
+                )
+
+            epub_base_url = match.group(0).rstrip("/")
+            self.ebook_name = (
+                epub_base_url.rsplit("/", 1)[-1].removesuffix(".epub")
+            )
+        elif domain == "spread.epub.pub":
+            content_opf_url = self._get_epub_pub_ebook_content_opf_url(self.url)
+            epub_base_url = self._get_epub_base_url_from_specific_url(content_opf_url)
         elif domain == "asset.epub.pub":
-            epub_base_url: str = self._get_epub_base_url_from_specific_url(self.url)
+            epub_base_url = self._get_epub_base_url_from_specific_url(self.url)
         else:
-            content_opf_url: str = self._get_epub_pub_read_online_opf_url()
-            epub_base_url: str = self._get_epub_base_url_from_specific_url(
-                content_opf_url
-            )
+            content_opf_url = self._get_epub_pub_read_online_opf_url()
+            epub_base_url = self._get_epub_base_url_from_specific_url(content_opf_url)
+
         self.logster.log(f"Determined EPUB base URL: {epub_base_url}")
         return epub_base_url
 
@@ -64,15 +79,21 @@ class EpubPubHandler(EpubHandler):
         scraper = cloudscraper.create_scraper()
         response = scraper.get(read_online_url)
         response.raise_for_status()
-        soup = BeautifulSoup(response.content, "html.parser")
-        for script in soup.findAll("script"):
-            potential_url = re.search(r'https?://\S+', str(script))
-            if potential_url:
-                if ".opf" in potential_url.group(0):
-                    asset_url: str = potential_url.group(0).split('.opf')[0]+'.opf'
-        if (
-                not asset_url
-        ):
-            raise RuntimeError("Failed to find content.opf URL in the spread page.")
 
-        return asset_url
+        # The current spread.epub.pub page embeds the asset URL
+        # in Next.js serialized page data.
+        match = re.search(
+            r'https://asset\.epub\.pub/[^"\\\s]*?\.epub/[^"\\\s]*\.opf',
+            response.text,
+        )
+
+        if match:
+            asset_url = match.group(0)
+            self.logster.log(f"Found content.opf URL: {asset_url}")
+            return asset_url
+
+        raise RuntimeError(
+            "Failed to find content.opf URL in the spread page. "
+            "The page format may have changed or access may be blocked."
+        )
+
